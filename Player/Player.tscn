@@ -1,0 +1,182 @@
+[gd_scene load_steps=11 format=3 uid="uid://cof5l3cf73qgw"]
+
+[ext_resource type="Script" path="res://Player.gd" id="1_yyc5g"]
+[ext_resource type="Script" path="res://State.gd" id="2_yxjdn"]
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_1452h"]
+properties/0/path = NodePath(".:id")
+properties/0/spawn = true
+properties/0/sync = false
+properties/1/path = NodePath(".:start_pos")
+properties/1/spawn = true
+properties/1/sync = false
+properties/2/path = NodePath(".:username")
+properties/2/spawn = true
+properties/2/sync = false
+
+[sub_resource type="SceneReplicationConfig" id="SceneReplicationConfig_wuavt"]
+properties/0/path = NodePath(".:look_h")
+properties/0/spawn = false
+properties/0/sync = true
+properties/1/path = NodePath(".:look_v")
+properties/1/spawn = false
+properties/1/sync = true
+properties/2/path = NodePath(".:sync_position")
+properties/2/spawn = false
+properties/2/sync = true
+properties/3/path = NodePath(".:sync_velocity")
+properties/3/spawn = false
+properties/3/sync = true
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_tqcjd"]
+radius = 1.0
+height = 4.0
+
+[sub_resource type="BoxMesh" id="BoxMesh_x7cyb"]
+size = Vector3(0.8, 0.8, 0.8)
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_0a8vn"]
+top_radius = 0.0
+bottom_radius = 0.25
+
+[sub_resource type="BoxMesh" id="BoxMesh_a3gt5"]
+size = Vector3(0.9, 1, 0.45)
+
+[sub_resource type="BoxMesh" id="BoxMesh_pltoe"]
+size = Vector3(0.35, 0.805, 0.35)
+
+[sub_resource type="BoxMesh" id="BoxMesh_5m4yj"]
+size = Vector3(0.35, 0.15, 0.6)
+
+[node name="Player" type="CharacterBody3D" node_paths=PackedStringArray("head", "camera", "input", "tag")]
+transform = Transform3D(0.5, 0, 0, 0, 0.5, 0, 0, 0, 0.5, 0, 0, 0)
+script = ExtResource("1_yyc5g")
+head = NodePath("CharacterRig/Head")
+camera = NodePath("CharacterRig/Head/Camera")
+input = NodePath("SyncInput")
+tag = NodePath("Tag")
+
+[node name="ServerSynchronizer" type="MultiplayerSynchronizer" parent="."]
+replication_config = SubResource("SceneReplicationConfig_1452h")
+
+[node name="SyncInput" type="MultiplayerSynchronizer" parent="." node_paths=PackedStringArray("player")]
+root_path = NodePath(".")
+replication_config = SubResource("SceneReplicationConfig_wuavt")
+script = ExtResource("2_yxjdn")
+player = NodePath("..")
+
+[node name="Tag" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5, 0)
+pixel_size = 0.01
+billboard = 1
+alpha_cut = 1
+alpha_hash_scale = 0.83
+texture_filter = 1
+render_priority = 1
+outline_render_priority = 0
+outline_modulate = Color(0, 0, 0, 0)
+text = "mr. fucker"
+font_size = 64
+outline_size = 3
+
+[node name="Collider" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2, 0)
+shape = SubResource("CapsuleShape3D_tqcjd")
+
+[node name="CharacterRig" type="Node3D" parent="."]
+
+[node name="Head" type="Node3D" parent="CharacterRig"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 3, 0)
+
+[node name="Head" type="MeshInstance3D" parent="CharacterRig/Head"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+layers = 2
+mesh = SubResource("BoxMesh_x7cyb")
+skeleton = NodePath("../../../..")
+
+[node name="Spear" type="MeshInstance3D" parent="CharacterRig/Head"]
+transform = Transform3D(1, 0, 0, 0, -4.37114e-08, -1, 0, 1, -4.37114e-08, 0, 0.4, 1)
+layers = 2
+mesh = SubResource("CylinderMesh_0a8vn")
+skeleton = NodePath("../../../..")
+
+[node name="Camera" type="Camera3D" parent="CharacterRig/Head"]
+transform = Transform3D(-4, 0, -3.49691e-07, 0, 4, 0, 3.49691e-07, 0, -4, 0, 0.4, 0.3)
+
+[node name="Chest" type="MeshInstance3D" parent="CharacterRig"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.4, 0)
+layers = 2
+mesh = SubResource("BoxMesh_a3gt5")
+skeleton = NodePath("../../..")
+
+[node name="RightArm" type="Node3D" parent="CharacterRig"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.7, 2.8, 0)
+
+[node name="RUpperArm" type="MeshInstance3D" parent="CharacterRig/RightArm"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.4, 0)
+layers = 2
+mesh = SubResource("BoxMesh_pltoe")
+skeleton = NodePath("../../../..")
+
+[node name="RLowerArm" type="MeshInstance3D" parent="CharacterRig/RightArm"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1.3, 0)
+layers = 2
+mesh = SubResource("BoxMesh_pltoe")
+skeleton = NodePath("../../../..")
+
+[node name="LeftArm" type="Node3D" parent="CharacterRig"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.7, 2.8, 0)
+
+[node name="LUpperArm" type="MeshInstance3D" parent="CharacterRig/LeftArm"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.4, 0)
+layers = 2
+mesh = SubResource("BoxMesh_pltoe")
+skeleton = NodePath("../../../..")
+
+[node name="LLowerArm" type="MeshInstance3D" parent="CharacterRig/LeftArm"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1.3, 0)
+layers = 2
+mesh = SubResource("BoxMesh_pltoe")
+skeleton = NodePath("../../../..")
+
+[node name="LeftLeg" type="Node3D" parent="CharacterRig"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.25, 1.825, 0)
+
+[node name="LUpperLeg" type="MeshInstance3D" parent="CharacterRig/LeftLeg"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.4, 0)
+layers = 2
+mesh = SubResource("BoxMesh_pltoe")
+skeleton = NodePath("../../../..")
+
+[node name="LLowerLeg" type="MeshInstance3D" parent="CharacterRig/LeftLeg"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1.25, 0)
+layers = 2
+mesh = SubResource("BoxMesh_pltoe")
+skeleton = NodePath("../../../..")
+
+[node name="LFoot" type="MeshInstance3D" parent="CharacterRig/LeftLeg"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1.75, 0.125)
+layers = 2
+mesh = SubResource("BoxMesh_5m4yj")
+skeleton = NodePath("../../../..")
+
+[node name="RightLeg" type="Node3D" parent="CharacterRig"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.25, 1.825, 0)
+
+[node name="RUpperLeg" type="MeshInstance3D" parent="CharacterRig/RightLeg"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.4, 0)
+layers = 2
+mesh = SubResource("BoxMesh_pltoe")
+skeleton = NodePath("../../../..")
+
+[node name="RLowerLeg" type="MeshInstance3D" parent="CharacterRig/RightLeg"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1.25, 0)
+layers = 2
+mesh = SubResource("BoxMesh_pltoe")
+skeleton = NodePath("../../../..")
+
+[node name="RFoot" type="MeshInstance3D" parent="CharacterRig/RightLeg"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -1.75, 0.125)
+layers = 2
+mesh = SubResource("BoxMesh_5m4yj")
+skeleton = NodePath("../../../..")
