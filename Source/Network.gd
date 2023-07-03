@@ -2,6 +2,7 @@ extends Node
 
 # v0.1 - 6/25/2023
 # v0.2 - 6/27/2023
+# v0.3 - 7/2/2023
 
 signal new_connection(type, data)
 signal message_recieved(data)
@@ -27,17 +28,18 @@ const PING_PACKET_NAME = "ping"
 
 const KICK_PACKET_NAME = "kick"
 
+const SERVER_ID = 1
+
 var enet_peer = ENetMultiplayerPeer.new()
 var upnp : UPNP = null
 var port_mapped : int
-
 
 func _ready():
 	multiplayer.connected_to_server.connect(on_connection_success)
 	multiplayer.connection_failed.connect(on_connection_fail)
 	multiplayer.server_disconnected.connect(on_server_disconnect)
 
-func host(server_port : int = 21222, create_client : bool = true, max_clients : int = 32, enable_upnp : bool = true) -> bool:
+func host(server_port = 21222, create_client = true, max_clients = 32, enable_upnp = true) -> bool:
 	port_mapped = 0
 	
 	var err = enet_peer.create_server(server_port, max_clients)
@@ -62,7 +64,7 @@ func host(server_port : int = 21222, create_client : bool = true, max_clients : 
 		add_client(enet_peer.get_unique_id(), false)
 	port_mapped = server_port
 	
-	new_connection.emit(CONNECTION_TYPE.HOST, { "public_ip": upnp.query_external_address() if enable_upnp else "localhost" })
+	new_connection.emit(CONNECTION_TYPE.HOST, { "ip": upnp.query_external_address() if enable_upnp else "localhost" })
 	return true
 
 func join(ip : String, port : int) -> bool:
@@ -75,12 +77,13 @@ func join(ip : String, port : int) -> bool:
 	multiplayer.multiplayer_peer = enet_peer
 	return true
 
-
+@rpc("authority")
 func kick(peer_id : int, reason = "") -> bool:
 	if peer_id == 0 or peer_id == get_id() or enet_peer.get_peer(peer_id).get_state() != ENetPacketPeer.STATE_CONNECTED:
 		return false
 	
 	var kick_packet = default_packet(KICK_PACKET_NAME)
+	kick_packet["from"] = get_id()
 	kick_packet["peer_id"] = peer_id
 	kick_packet["reason"] = reason
 	
@@ -89,7 +92,6 @@ func kick(peer_id : int, reason = "") -> bool:
 	
 	var message = {}
 	while not (message.has("packet_name") and message["packet_name"] == KICK_PACKET_NAME):
-		print("iteration, getting new packet")
 		message = await message_recieved
 	
 	disconnect_self.rpc_id(peer_id)
@@ -97,7 +99,7 @@ func kick(peer_id : int, reason = "") -> bool:
 
 @rpc("authority")
 func disconnect_self():
-	on_remove_client(get_id())
+	await on_remove_client(get_id())
 	enet_peer.close()
 
 
@@ -136,12 +138,11 @@ func on_connection_success():
 
 
 func default_packet(packet_name : String):
-	var packet = { 
+	return { 
 		"packet_name": packet_name,
 		"from": get_id(),
 		"timestamp_unix" : Time.get_unix_time_from_system()
 	}
-	return packet
 
 @rpc("any_peer")
 func send_packet(packet : Dictionary):
@@ -163,10 +164,13 @@ func rpc_ping_usec(packet, send_reply): # send packet
 	rpc_pong_usec.rpc_id(packet["from"], packet, send_reply)
 
 func ping_usec(peer_id, send_reply):
-	if peer_id == get_id():
-		printerr("Cannot ping yourself")
-		return
-	var packet = { "packet_name": PING_PACKET_NAME, "from": get_id(), "to" : peer_id, "timestamp_mode": "usec", "timestamp_sent": Time.get_ticks_usec() }
+	var packet = default_packet(PING_PACKET_NAME)
+	packet.merge({
+		"from": get_id(),
+		"to": peer_id,
+		"timestamp_mode": "usec",
+		"timestamp_sent": Time.get_ticks_usec()
+		})
 	rpc_ping_usec.rpc_id(peer_id, packet, send_reply)
 
 # Ping using msec (milliseconds)
@@ -183,10 +187,13 @@ func rpc_ping_msec(packet, send_reply): # send packet
 	rpc_pong_msec.rpc_id(packet["from"], packet, send_reply)
 
 func ping_msec(peer_id, send_reply):
-	if peer_id == get_id():
-		printerr("Cannot ping yourself")
-		return
-	var packet = { "packet_name": PING_PACKET_NAME, "from": get_id(), "to" : peer_id, "timestamp_mode": "msec", "timestamp_sent": Time.get_ticks_msec() }
+	var packet = default_packet(PING_PACKET_NAME)
+	packet.merge({
+		"from": get_id(),
+		"to": peer_id,
+		"timestamp_mode": "msec",
+		"timestamp_sent": Time.get_ticks_usec()
+		})
 	rpc_ping_msec.rpc_id(peer_id, packet, send_reply)
 
 @rpc("any_peer", "call_remote", "reliable", PING_CHANNEL)
@@ -194,16 +201,16 @@ func rpc_ping_reply(packet):
 	message_recieved.emit(packet)
 
 func ping(peer_id, send_reply = true):
+	if peer_id == get_id():
+		printerr("Cannot ping yourself")
+		return
 	ping_usec(peer_id, send_reply) if PING_MICROSECOND else ping_msec(peer_id, send_reply)
 
 
 
 
 func get_id() -> int:
-	if enet_peer.get_connection_status() == ENetMultiplayerPeer.CONNECTION_CONNECTED:
-		return enet_peer.get_unique_id()
-	printerr("Cannot retrieve id")
-	return 0
+	return multiplayer.get_unique_id()
 
 func upnp_setup(server_port : int) -> bool:
 	var upnpresult_to_str = func(error : int) -> String:
