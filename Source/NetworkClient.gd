@@ -1,15 +1,38 @@
 extends Node
 
-# v0.1 7/2/2023
+# v0.0.1 7/2/2023
+# v0.0.2 7/5/2023
 
 signal new_connection(type, data)
 
 enum CONNECTION_TYPE {
 	CONNECTED,
 	DISCONNECTED,
+	VALIDATION_SUCCESS,
+	VALIDATION_FAILED,
 	KICK,
 	BAN,
 }
+
+enum VALIDATION_LEVEL {
+	NONE = 0,
+	
+	PROJECT_NAME = 1,
+	NET_VERSION_MAJOR = 2,
+	NET_VERSION_MINOR = 4,
+	NET_VERSION_PATCH = 8,
+	CLIENT_VERSION_MAJOR = 16,
+	CLIENT_VERSION_MINOR = 32,
+	CLIENT_VERSION_PATCH = 64,
+	
+	CLIENT_VERSION_ONLY = 112,
+	VERSION_ONLY = 126,
+	EVERYTHING = 127
+}
+
+const VERSION = "0.0.2"
+
+const VALIDATION_PACKET = "validation-packet"
 
 const api_ipv4 = "https://api.ipify.org"
 const api_ipv6 = "https://api64.ipify.org"
@@ -26,15 +49,26 @@ var server_information
 
 var private = {}
 
-func default_server_information() -> Dictionary:
+func validation_data() -> Dictionary:
 	return {
+		"net-version": Network.VERSION,
+		"client-version": VERSION,
+		"project-name": ProjectSettings.get_setting("application/config/name")
+	}
+
+func default_server_information() -> Dictionary:
+	var info = {
 		"server-name": "My Server",
+		"version-validation": true,
 		"public-server": true,
 		"port": 21222,
 		"password-protected": true,
 		"password": "password123",
 		"max-clients": 32,
+		"validation-level": VALIDATION_LEVEL.EVERYTHING
 	}
+	info.merge(validation_data())
+	return info
 
 func _init():
 	Network.message_recieved.connect(network_message)
@@ -133,14 +167,19 @@ func network_connection(type, data):
 		Network.CONNECTION_TYPE.DISCONNECTED:
 			pass
 		Network.CONNECTION_TYPE.PEER_CONNECTED:
-			if not multiplayer.is_server():
-				return
 			var peer_id = data["peer_id"]
-			var packet = Network.default_packet("server_login_request")
-			packet.merge({
-				"password-request": server_information["password-protected"]
-			})
-			Network.send_packet.rpc_id(peer_id, packet)
+			if multiplayer.is_server():
+				if server_information["version-validation"]:
+					var validation_packet = Network.default_packet(VALIDATION_PACKET)
+					Network.send_packet.rpc_id(peer_id, validation_packet)
+				return
+			
+			
+#			var login_packet = Network.default_packet("server_login_request")
+#			login_packet.merge({
+#				"password-request": server_information["password-protected"]
+#			})
+#			Network.send_packet.rpc_id(peer_id, login_packet)
 		Network.CONNECTION_TYPE.PEER_DISCONNECTED:
 			pass
 		Network.CONNECTION_TYPE.VALID_CONNECTION:
@@ -160,11 +199,72 @@ func network_message(data):
 			var ping = ping_packet(data["timestamp_recieved"], data["timestamp_sent"], data["timestamp_mode"], data["to"])
 		Network.KICK_PACKET_NAME:
 			if data["peer_id"] == Network.get_id():
-				new_connection.emit(CONNECTION_TYPE.KICK, {"from": data["from"], "reason": data["reason"]})
+				new_connection.emit(CONNECTION_TYPE.KICK, { "from": data["from"], "reason": data["reason"] })
+		VALIDATION_PACKET:
+			validation_request(data)
+		VALIDATION_PACKET + "/reply":
+			var reply = validation_reply(data)
+			if not verify_validation_data(reply):
+				new_connection.emit(CONNECTION_TYPE.VALIDATION_FAILED)
+				Network.kick(data["from"], "Validation failed")
+				return
+			new_connection.emit(CONNECTION_TYPE.VALIDATION_SUCCESS)
 		"server_login_request":
 			login_request(data)
 		"server_login_request/reply":
 			login_reply(data)
+
+func verify_validation_data(data : Array) -> bool:
+	var v_level = server_information["validation-level"]
+	var verification = 0
+	
+	if v_level == VALIDATION_LEVEL.NONE:
+		return true
+	
+	if v_level & VALIDATION_LEVEL.NET_VERSION_MAJOR:
+		verification |= data[0][0]
+	if v_level & VALIDATION_LEVEL.NET_VERSION_MINOR:
+		verification |= data[0][1]
+	if v_level & VALIDATION_LEVEL.NET_VERSION_PATCH:
+		verification |= data[0][2]
+	if v_level & VALIDATION_LEVEL.CLIENT_VERSION_MAJOR:
+		verification |= data[1][0]
+	if v_level & VALIDATION_LEVEL.CLIENT_VERSION_MINOR:
+		verification |= data[1][1]
+	if v_level & VALIDATION_LEVEL.CLIENT_VERSION_PATCH:
+		verification |= data[1][2]
+	if v_level & VALIDATION_LEVEL.PROJECT_NAME:
+		verification |= not data[2] as int
+	
+	return not bool(verification)
+
+func validation_request(data):
+	var packet = Network.default_packet(VALIDATION_PACKET + "/reply")
+	packet.merge(validation_data())
+	Network.send_packet.rpc_id(Network.SERVER_ID, packet)
+
+func validation_reply(data):
+	if not multiplayer.is_server():
+		return
+	
+	const nv = "net-version"
+	const cv = "client-version"
+	const pn = "project-name"
+	
+	var comp_version = func(verA : String, verB : String) -> Array:
+		var splitA = verA.split('.')
+		var splitB = verB.split('.')
+		
+		var arr = []
+		for i in range(3):
+			arr.append(splitA[i].to_int() - splitB[i].to_int())
+		return arr
+	
+	return [
+		comp_version.call(server_information[nv], data[nv]),
+		comp_version.call(server_information[cv], data[cv]),
+		server_information[pn] == data[pn]
+	]
 
 func login_reply(data):
 	if not multiplayer.is_server():

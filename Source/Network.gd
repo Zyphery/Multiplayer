@@ -1,8 +1,9 @@
 extends Node
 
-# v0.1 - 6/25/2023
-# v0.2 - 6/27/2023
-# v0.3 - 7/2/2023
+# v0.0.1 - 6/25/2023
+# v0.0.2 - 6/27/2023
+# v0.0.3 - 7/2/2023
+# v0.0.4 - 7/5/2023
 
 signal new_connection(type, data)
 signal message_recieved(data)
@@ -21,6 +22,8 @@ enum CONNECTION_TYPE {
 
 	SERVER_CLOSED
 }
+
+const VERSION = "0.0.4"
 
 const PING_MICROSECOND = true
 const PING_CHANNEL = 1
