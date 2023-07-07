@@ -2,6 +2,7 @@ extends Node
 
 # v0.0.1 7/2/2023
 # v0.0.2 7/5/2023
+# v0.0.3 7/7/2023
 
 signal new_connection(type, data)
 
@@ -10,6 +11,8 @@ enum CONNECTION_TYPE {
 	DISCONNECTED,
 	VALIDATION_SUCCESS,
 	VALIDATION_FAILED,
+	LOGIN_SUCCESS,
+	LOGIN_FAILED,
 	KICK,
 	BAN,
 }
@@ -30,7 +33,7 @@ enum VALIDATION_LEVEL {
 	EVERYTHING = 127
 }
 
-const VERSION = "0.0.2"
+const VERSION = "0.0.3"
 
 const VALIDATION_PACKET = "validation-packet"
 
@@ -40,9 +43,9 @@ const api_ipv6 = "https://api64.ipify.org"
 var public_ipv4
 var public_ipv6
 
-var pending_clients
-var connecting_clients
-var connected_client_data
+var pending_clients = {}
+var connected_clients = {}
+#var connected_client_data
 var ban_list
 
 var server_information
@@ -62,8 +65,8 @@ func default_server_information() -> Dictionary:
 		"version-validation": true,
 		"public-server": true,
 		"port": 21222,
-		"password-protected": true,
-		"password": "password123",
+		"password-protected": false,
+		"password": "",
 		"max-clients": 32,
 		"validation-level": VALIDATION_LEVEL.EVERYTHING
 	}
@@ -82,39 +85,37 @@ func join(info : Dictionary):
 	var ip = info["ip"] as String
 	var port = info["port"] as int
 	private["password-attempt"] = info["password"]
-	private["username"] = info["username"]
 	
-	if not Network.join(ip, port):
-		return false
+	return Network.join(ip, port)
 
-func host(info : Dictionary):
+func is_peer_connected(peer_id : int) -> bool:
+	return multiplayer.get_peers().find(peer_id)
+
+func get_client_data(peer_id : int) -> Dictionary:
+	return connected_clients[peer_id]
+
+
+func host(info : Array):
 	if info.is_empty():
 		error("Server info is invalid")
 		return false
-	var port = info["port"] as int
-	var upnp = info["public-server"] as bool
-	var max_clients = info["max-clients"] as int
+	var port = info[0]["port"] as int
+	var upnp = info[0]["public-server"] as bool
+	var max_clients = info[0]["max-clients"] as int
+	var local_client = info[1]
+	server_information = info[0]
 	
-	server_information = info
-	if not Network.host(port, true, max_clients, upnp):
+	if not Network.host(port, local_client, max_clients, upnp):
 		return false
 	
 	server_information["local-ip"] = IP.get_local_addresses()
+	if local_client:
+		connected_clients[Network.get_id()] = info[1]
 	
 	if upnp:
 		await grab_public_ip()
 		server_information["public-ipv4"] = public_ipv4
 		server_information["public-ipv6"] = public_ipv6
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -139,80 +140,13 @@ func grab_public_ip():
 	
 	http.queue_free()
 
-func ban_ip(ip, reason = ""):
-	pass
+#func ban_ip(ip, reason = ""):
+#	pass
+#
+#func ban_username(username, reason = ""):
+#	pass
 
-func ban_username(username, reason = ""):
-	pass
 
-
-
-func networkclient_connection(type, data):
-	match type:
-		CONNECTION_TYPE.CONNECTED:
-			pass
-		CONNECTION_TYPE.DISCONNECTED:
-			pass
-		CONNECTION_TYPE.KICK:
-			pass
-		CONNECTION_TYPE.BAN:
-			pass
-
-func network_connection(type, data):
-	match type:
-		Network.CONNECTION_TYPE.HOST:
-			pass
-		Network.CONNECTION_TYPE.CONNECTED:
-			pass
-		Network.CONNECTION_TYPE.DISCONNECTED:
-			pass
-		Network.CONNECTION_TYPE.PEER_CONNECTED:
-			var peer_id = data["peer_id"]
-			if multiplayer.is_server():
-				if server_information["version-validation"]:
-					var validation_packet = Network.default_packet(VALIDATION_PACKET)
-					Network.send_packet.rpc_id(peer_id, validation_packet)
-				return
-			
-			
-#			var login_packet = Network.default_packet("server_login_request")
-#			login_packet.merge({
-#				"password-request": server_information["password-protected"]
-#			})
-#			Network.send_packet.rpc_id(peer_id, login_packet)
-		Network.CONNECTION_TYPE.PEER_DISCONNECTED:
-			pass
-		Network.CONNECTION_TYPE.VALID_CONNECTION:
-			pass
-		Network.CONNECTION_TYPE.SERVER_CLOSED:
-			pass
-		Network.CONNECTION_TYPE.FAILED_CONNECTION:
-			pass
-
-func network_message(data):
-	if not data.has("packet_name"):
-		error("Packet recieved without packet_name")
-		return
-	
-	match data["packet_name"]:
-		Network.PING_PACKET_NAME:
-			var ping = ping_packet(data["timestamp_recieved"], data["timestamp_sent"], data["timestamp_mode"], data["to"])
-		Network.KICK_PACKET_NAME:
-			if data["peer_id"] == Network.get_id():
-				new_connection.emit(CONNECTION_TYPE.KICK, { "from": data["from"], "reason": data["reason"] })
-		VALIDATION_PACKET:
-			validation_request(data)
-		VALIDATION_PACKET + "/reply":
-			var reply = validation_reply(data)
-			if not verify_validation_data(reply):
-				new_connection.emit(CONNECTION_TYPE.VALIDATION_FAILED)
-				Network.kick(data["from"], "Validation failed")
-				return
-			new_connection.emit(CONNECTION_TYPE.VALIDATION_SUCCESS)
-		"server_login_request":
-			login_request(data)
-		"server_login_request/reply":
-			login_reply(data)
 
 func verify_validation_data(data : Array) -> bool:
 	var v_level = server_information["validation-level"]
@@ -241,12 +175,9 @@ func verify_validation_data(data : Array) -> bool:
 func validation_request(data):
 	var packet = Network.default_packet(VALIDATION_PACKET + "/reply")
 	packet.merge(validation_data())
-	Network.send_packet.rpc_id(Network.SERVER_ID, packet)
+	Network.send_packet(Network.SERVER_ID, packet)
 
 func validation_reply(data):
-	if not multiplayer.is_server():
-		return
-	
 	const nv = "net-version"
 	const cv = "client-version"
 	const pn = "project-name"
@@ -266,33 +197,14 @@ func validation_reply(data):
 		server_information[pn] == data[pn]
 	]
 
-func login_reply(data):
-	if not multiplayer.is_server():
-		return
-	if server_information["password-protected"]:
-		var attempt = data["password-attempt"]
-		var server_password = server_information["password"].hash()
-		if not attempt == server_password:
-			Network.kick(data["from"], "Invalid password")
-		else:
-			new_connection.emit(CONNECTION_TYPE.CONNECTED, data)
-
-func login_request(server_packet : Dictionary):
-	var reply_packet = Network.default_packet("server_login_request/reply")
-	var password = private["password-attempt"]
-	if server_packet["password-request"]:
-		reply_packet.merge({"password-attempt": password.hash()})
-	
-	Network.send_packet.rpc_id(Network.SERVER_ID, reply_packet)
-
 func ping_packet(time_recieved, time_sent, time_mode, peer_to) -> float:
 	var ping_time = time_recieved - time_sent
 	if time_mode == "usec":
 		ping_time /= 1e+3
-	var new_packet = Network.default_packet("update_ping")
-	new_packet["ping_time"] = ping_time
-	new_packet["peer_id"] = peer_to
-	Network.send_packet.rpc(new_packet)
+	var new_packet = Network.default_packet("update-ping")
+	new_packet["ping-time"] = ping_time
+	new_packet["peer-id"] = peer_to
+	Network.send_packet(0, new_packet)
 	
 	return ping_time
 
@@ -301,8 +213,109 @@ func error(message):
 
 
 
+func networkclient_connection(type, data):
+	match type:
+		CONNECTION_TYPE.CONNECTED:
+			pass
+		CONNECTION_TYPE.DISCONNECTED:
+			pass
+		CONNECTION_TYPE.VALIDATION_SUCCESS:
+			pass
+		CONNECTION_TYPE.VALIDATION_FAILED:
+			pass
+		CONNECTION_TYPE.KICK:
+			pass
+		CONNECTION_TYPE.BAN:
+			pass
 
+func network_connection(type, data):
+	match type:
+		Network.CONNECTION_TYPE.HOST:
+			pass
+		Network.CONNECTION_TYPE.CONNECTED:
+			pass
+		Network.CONNECTION_TYPE.DISCONNECTED:
+			pass
+		Network.CONNECTION_TYPE.PEER_CONNECTED:
+			var peer_id = data["peer-id"]
+			if multiplayer.is_server():
+				pending_clients[peer_id] = {
+					"time-connected": Time.get_unix_time_from_system()
+				}
+				if server_information["version-validation"]:
+					var validation_packet = Network.default_packet(VALIDATION_PACKET)
+					Network.send_packet(peer_id, validation_packet)
+				
+				var login_packet = Network.default_packet("server-login-request")
+				login_packet["password-required"] = server_information["password-protected"]
+				Network.send_packet(peer_id, login_packet)
+				
+				var user_data_packet = Network.default_packet("user-data-request")
+				Network.send_packet(peer_id, user_data_packet)
+				return
+			
+		Network.CONNECTION_TYPE.PEER_DISCONNECTED:
+			pass
+		Network.CONNECTION_TYPE.VALID_CONNECTION:
+			pass
+		Network.CONNECTION_TYPE.SERVER_CLOSED:
+			pass
+		Network.CONNECTION_TYPE.FAILED_CONNECTION:
+			pass
 
+func network_message(data):
+	match data[Network.PACKET_NAME]:
+		Network.PING_PACKET_NAME:
+			var ping = ping_packet(data["timestamp-recieved"], data["timestamp-sent"], data["timestamp-mode"], data["to"])
+		Network.KICK_PACKET_NAME:
+			if data["peer-id"] == Network.get_id():
+				new_connection.emit(CONNECTION_TYPE.KICK, { "from": data["from"], "reason": data["reason"] })
+		VALIDATION_PACKET:
+			validation_request(data)
+		VALIDATION_PACKET + "/reply":
+			if not multiplayer.is_server():
+				error("\'%s\' packet recieved but was not the server. " % data[Network.PACKET_NAME])
+				return
+			
+			var peer_id = data["from"]
+			var reply = validation_reply(data)
+			if not verify_validation_data(reply):
+				new_connection.emit(CONNECTION_TYPE.VALIDATION_FAILED, {})
+				Network.kick(peer_id, "Validation failed")
+				return
+			new_connection.emit(CONNECTION_TYPE.VALIDATION_SUCCESS, {})
+			
+		"server-login-request":
+			var reply_packet = Network.default_packet("server-login-request/reply")
+			var password = private["password-attempt"]
+			if data["password-required"]:
+				reply_packet.merge({"password-attempt": password.hash()})
+			
+			Network.send_packet(Network.SERVER_ID, reply_packet)
+		"server-login-request/reply":
+			if not multiplayer.is_server():
+				return
+			if server_information["password-protected"]:
+				var attempt = data["password-attempt"]
+				var server_password = server_information["password"].hash()
+				if not attempt == server_password:
+					Network.kick(data["from"], "Invalid password")
+					return
+		"user-data-request/reply":
+			var peer_id = data["from"]
+			var user_data = data.duplicate(true)
+			
+			var packet_keys = Network.default_packet("").keys()
+			for key in packet_keys:
+				user_data.erase(key)
+			
+			connected_clients[peer_id] = user_data
+			connected_clients[peer_id].merge({
+				"time-connected": pending_clients[peer_id]["time-connected"],
+				"time-validated": Time.get_unix_time_from_system()
+			}, true)
+			pending_clients.erase(peer_id)
+			new_connection.emit(CONNECTION_TYPE.CONNECTED, { "peer-id": peer_id })
 
 
 
